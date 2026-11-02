@@ -16,6 +16,6 @@ ATRIUM - setup (Windows)
    Keep the black terminal window open while using the app.
 
 Folder must look like:
-  notesync-ai\
+  Atrium\
     package.json  server.js  .env  start.bat
     public\index.html
