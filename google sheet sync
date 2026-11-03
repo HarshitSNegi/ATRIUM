@@ -1,0 +1,83 @@
+## 
+"""
+sheets_sync.py  -  put this file in the same folder as your attendance script.
+ 
+Setup (one time):
+  1. pip install gspread google-auth
+  2. Google Cloud Console -> create project -> enable "Google Sheets API"
+     and "Google Drive API".
+  3. Credentials -> Create service account -> Keys -> Add key -> JSON.
+     Save the file as  credentials.json  next to your script.
+  4. Create a Google Sheet (name it exactly as SHEET_NAME below) and
+     SHARE it (Editor) with the service account's email
+     (the "client_email" inside credentials.json).
+"""
+import gspread
+from google.oauth2.service_account import Credentials
+ 
+SHEET_NAME = "Attendance"
+CREDS_FILE = "credentials.json"
+SCOPES = [
+    "https://www.googleapis.com/auth/spreadsheets",
+    "https://www.googleapis.com/auth/drive",
+]
+ 
+_book = None
+ 
+ 
+def _get_book():
+    global _book
+    if _book is None:
+        creds = Credentials.from_service_account_file(CREDS_FILE, scopes=SCOPES)
+        _book = gspread.authorize(creds).open(SHEET_NAME)
+    return _book
+ 
+ 
+def _get_sheets():
+    """Returns (log_sheet, summary_sheet), creating them if missing."""
+    book = _get_book()
+    titles = [w.title for w in book.worksheets()]
+ 
+    if "Log" not in titles:
+        log = book.add_worksheet("Log", rows=2000, cols=4)
+        log.append_row(["Date", "ID", "Name", "Time"])
+    else:
+        log = book.worksheet("Log")
+ 
+    if "Summary" not in titles:
+        summ = book.add_worksheet("Summary", rows=500, cols=5)
+        summ.append_row(["ID", "Name", "Days Present", "Total Classes", "Attendance %"])
+    else:
+        summ = book.worksheet("Summary")
+    return log, summ
+ 
+ 
+def add_student(student_id, name):
+    """Call after a new student is registered. Adds a Summary row with
+    formulas, so totals and % update by themselves."""
+    _, summ = _get_sheets()
+    ids = [str(x) for x in summ.col_values(1)[1:]]
+    if str(student_id) in ids:
+        return
+    r = len(ids) + 2  # next empty row
+    row = [
+        student_id,
+        name,
+        f"=COUNTIF(Log!B:B,A{r})",
+        '=IFERROR(COUNTA(UNIQUE(FILTER(Log!A2:A,Log!A2:A<>""))),0)',
+        f"=IF(D{r}=0,0,C{r}/D{r})",
+    ]
+    summ.update(f"A{r}:E{r}", [row], value_input_option="USER_ENTERED")
+    summ.format(f"E{r}", {"numberFormat": {"type": "PERCENT", "pattern": "0.0%"}})
+ 
+ 
+def log_attendance(student_id, name, date, time_str):
+    """Adds one Log row (once per student per day). Returns True if added."""
+    log, summ = _get_sheets()
+    rows = log.get_all_values()[1:]
+    for d, i, *_ in rows:
+        if d == date and str(i) == str(student_id):
+            return False
+    log.append_row([date, student_id, name, time_str], value_input_option="USER_ENTERED")
+    add_student(student_id, name)  # make sure they have a Summary row
+    return True
